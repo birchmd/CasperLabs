@@ -112,9 +112,40 @@ object Voting {
   val accountAddress: ByteString =
     ByteString.copyFrom(Base16.decode(accountAddressBase16))
 
+  def right[A, C](a: A): Either[C, A] = Right(a)
+  def left[A, C](a: A): Either[A, C]  = Left(a)
+
+  def proposeWithRetry[F[_]](implicit s: Sync[F], d: DeployService[F]): F[Option[BlockHash]] =
+    Sync[F].tailRecM(()) { _ =>
+      d.createBlock.rethrow.attempt.flatMap {
+        case Left(throwable) if throwable.getMessage contains "NoNewDeploys" =>
+          // no new deploys means a different propose picked up our deploy, so
+          // just go with the latest block (i.e. nothing new to return)
+          right[Option[BlockHash], Unit](None).pure[F]
+
+        case Left(throwable) if throwable.getMessage contains "another propose in progress" =>
+          // an other propose is in progress, so we will try again
+          left[Unit, Option[BlockHash]](()).pure[F]
+
+        case Left(throwable) =>
+          // we don't know how to deal with other errors
+          Sync[F].raiseError(throwable)
+
+        case Right(result) if result.startsWith("Success") =>
+          // success!
+          right[Option[BlockHash], Unit](result.split("Block")(1).trim.split('.').head.some).pure[F]
+
+        case Right(result) =>
+          // don't know what to do if the result is not a success
+          Sync[F].raiseError(
+            new RuntimeException(s"Unexpected response from block creation: $result")
+          )
+      }
+    }
+
   def vote[F[_]](
       option: SatoshiIdentity
-  )(implicit s: Sync[F], d: DeployService[F]): F[BlockHash] = {
+  )(implicit s: Sync[F], d: DeployService[F]): F[Option[BlockHash]] = {
     val i           = option.id
     val iBytes      = ByteString.copyFrom(Array(1, 0, 0, 0, 4, 0, 0, 0, i, 0, 0, 0).map(_.toByte))
     val sessionCode = DeployCode().withCode(voteWasm).withArgs(iBytes)
@@ -129,14 +160,8 @@ object Voting {
       .withNonce(0L)
 
     for {
-      _      <- DeployService[F].deploy(deploy).rethrow
-      result <- DeployService[F].createBlock().rethrow
-      hash <- if (result.startsWith("Success"))
-               result.split("Block")(1).trim.split('.').head.pure[F]
-             else
-               Sync[F].raiseError(
-                 new RuntimeException(s"Unexpected response from block creation: $result")
-               )
+      _    <- DeployService[F].deploy(deploy).rethrow
+      hash <- proposeWithRetry[F](s, d)
     } yield hash
   }
 }
@@ -163,8 +188,11 @@ object Radio {
     case Full(selection) if idMapping.contains(selection) =>
       val selected = SatoshiIdentity(idMapping(selection))
       val votingTask = for {
-        hash <- Voting.vote[Task](selected)(Sync[Task], Voting.deployService)
-        _    <- Querying.latestBlock.set(Some(hash))
+        maybeHash <- Voting.vote[Task](selected)(Sync[Task], Voting.deployService)
+        _ <- maybeHash match {
+              case Some(hash) => Querying.latestBlock.set(Some(hash))
+              case None       => ().pure[Task]
+            }
       } yield ()
 
       votingTask.runSyncUnsafe()
