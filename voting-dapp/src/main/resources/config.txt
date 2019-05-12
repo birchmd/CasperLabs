@@ -1,0 +1,2 @@
+host = 3.16.244.129
+wasm = /mnt/c/Users/mbirc/Documents/CasperLabs/CasperLabs/voting-dapp/rust/call/target/wasm32-unknown-unknown/release/vote.wasm

@@ -10,6 +10,7 @@ import io.casperlabs.client.{DeployService, GrpcDeployService}
 import io.casperlabs.crypto.codec.Base16
 import io.casperlabs.casper.protocol._
 import io.casperlabs.shared.UncaughtExceptionLogger
+import io.casperlabs.voting.Config
 
 import java.io.File
 import java.nio.file.Files
@@ -102,11 +103,9 @@ object Voting {
   import SatoshiIdentity._
   type BlockHash = String
 
-  val deployService = new GrpcDeployService("3.16.244.129", 40401)
-  val voteContract: File =
-    new File(
-      "/mnt/c/Users/mbirc/Documents/CasperLabs/CasperLabs/voting-dapp/rust/call/target/wasm32-unknown-unknown/release/vote.wasm"
-    )
+  val Config(host, wasm) = Config.fromResource()
+  val deployService      = new GrpcDeployService(host, 40401)
+  val voteContract: File = new File(wasm)
 
   val voteWasm: ByteString         = ByteString.copyFrom(Files.readAllBytes(voteContract.toPath))
   val accountAddressBase16: String = "3030303030303030303030303030303030303030"
