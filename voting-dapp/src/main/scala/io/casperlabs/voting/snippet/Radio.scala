@@ -18,6 +18,7 @@ import monix.eval.Task
 import monix.execution.Scheduler
 
 import net.liftweb.common._
+import net.liftweb.util.PassThru
 import net.liftweb.util.Helpers._
 import net.liftweb.http.{S, SHtml}
 import net.liftweb.http.SHtml.ChoiceHolder
@@ -142,19 +143,26 @@ object Voting {
 }
 
 object Radio {
-  import SatoshiIdentity._
-
   implicit val scheduler: Scheduler = Scheduler.computation(
     Math.max(java.lang.Runtime.getRuntime.availableProcessors(), 2),
     "node-runner",
     reporter = UncaughtExceptionLogger
   )
 
-  val options: Seq[SatoshiIdentity] = SatoshiIdentity.values.toSeq
-  val default: Box[SatoshiIdentity] = Empty
-  val radio: ChoiceHolder[SatoshiIdentity] =
-    SHtml.radioElem(options, default) { selectedBox =>
-      val selected = selectedBox.openOr(hal)
+  val idMapping: Map[String, Int] = Map(
+    "hal"       -> 0,
+    "nick"      -> 1,
+    "dave"      -> 2,
+    "gov"       -> 3,
+    "craig"     -> 4,
+    "none"      -> 5,
+    "neverKnow" -> 6
+  )
+
+  def render = S.param("choice") match {
+    // form correctly submitted
+    case Full(selection) if idMapping.contains(selection) =>
+      val selected = SatoshiIdentity(idMapping(selection))
       val votingTask = for {
         hash <- Voting.vote[Task](selected)(Sync[Task], Voting.deployService)
         _    <- Querying.latestBlock.set(Some(hash))
@@ -162,7 +170,7 @@ object Radio {
 
       votingTask.runSyncUnsafe()
       S.redirectTo("/results")
-    }
 
-  def render = ".options" #> radio.toForm
+    case _ => PassThru
+  }
 }

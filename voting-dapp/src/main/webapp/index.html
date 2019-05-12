@@ -9,13 +9,19 @@
 
 <div id="main" data-lift="surround?with=default;at=content">
 
-  <div data-lift="Radio?form=post">
-    <span class="options">
-      <input type="radio">Option 1</input>
-      <input type="radio">Option 2</input>
-    </span>
-    <input type="submit" value="Submit">
-  </div>
+  <form data-lift="Radio" action="/" method=post>
+    <div>
+      <span><input type="radio" name="choice" value="hal"> Hal Finney<br> </span> 
+      <span><input type="radio" name="choice" value="nick"> Nick Szabo<br> </span> 
+      <span><input type="radio" name="choice" value="dave"> Dave Kleiman<br> </span> 
+      <span><input type="radio" name="choice" value="gov"> PsyOP directed by the U.S. Government<br> </span> 
+      <span><input type="radio" name="choice" value="craig"> Craig Wright<br> </span> 
+      <span><input type="radio" name="choice" value="none"> None of the above<br> </span> 
+      <span><input type="radio" name="choice" value="neverKnow"> The world will never know<br> </span> 
+
+      <input value="Submit" type="submit">
+    </div>
+  </form>
 
 </div>
 </body>
