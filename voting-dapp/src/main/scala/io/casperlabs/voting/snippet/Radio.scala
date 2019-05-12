@@ -48,7 +48,7 @@ object Voting {
 
   def vote[F[_]](option: SatoshiIdentity)(implicit s: Sync[F], d: DeployService[F]): F[Unit] = {
     val i           = option.id
-    val iBytes      = ByteString.copyFrom(Array(0, 0, 0, 1, 0, 0, 0, i).map(_.toByte))
+    val iBytes      = ByteString.copyFrom(Array(1, 0, 0, 0, 4, 0, 0, 0, i, 0, 0, 0).map(_.toByte))
     val sessionCode = DeployCode().withCode(voteWasm).withArgs(iBytes)
     val paymentCode = DeployCode().withCode(voteWasm)
 
