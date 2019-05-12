@@ -150,7 +150,10 @@ where
                             .exec(module, args, address, timestamp, nonce, gas_limit, protocol_version, rc_tc)
                         {
                             (Ok(ee), cost) => Ok(ExecutionResult::success(ee, cost)),
-                            (Err(error), cost) => Ok(ExecutionResult::failure(error.into(), cost)),
+                            (Err(error), cost) => {
+                                println!("Error in deploy: {:?}", error);
+                                Ok(ExecutionResult::failure(error.into(), cost))
+                            }
                         }
                     }
                 },
