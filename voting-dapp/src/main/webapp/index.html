@@ -1,13 +1,35 @@
 <!DOCTYPE html>
-<html>
+<html id="main" data-lift="surround?with=default;at=content">
 <head>
   <title>Who is Satoshi?</title>
+  <style>
+    body {
+      background-color: #000000;
+      font-family: Open Sans;
+      color: #ffffff;
+    }
+    #submit-button {
+      display:block;
+      background:rgba(231,76,62,1);
+      border-radius:3px;
+      box-shadow:none;
+      text-shadow:none;
+      color:#fff;
+      border-width:undefinedpx;
+      border-color:#undefined;
+      font-size:18px;
+      line-height:22px;
+      font-weight:700;
+      font-family:Open Sans;
+      font-style:normal;
+      text-align:center;
+      background-repeat:no-repeat;
+    }
+  </style>
 </head>
 <body data-lift-content-id="main">
 
-<h1>Who is Satoshi?</h1>
-
-<div id="main" data-lift="surround?with=default;at=content">
+  <h1>Who is Satoshi?</h1>
 
   <form data-lift="Radio" action="/" method=post>
     <div>
@@ -19,10 +41,9 @@
       <span><input type="radio" name="choice" value="all"> We are all Satoshi (except Craig)<br> </span> 
       <span><input type="radio" name="choice" value="neverKnow"> The world will never know<br> </span> 
 
-      <input value="Submit" type="submit">
+      <input value="Submit" type="submit" id="submit-button">
     </div>
   </form>
 
-</div>
 </body>
 </html>
