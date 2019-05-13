@@ -34,7 +34,7 @@ object SatoshiIdentity extends Enumeration {
   val dave      = Value("Dave Kleiman")
   val gov       = Value("PsyOP directed by the U.S. Government")
   val craig     = Value("Craig Wright")
-  val none      = Value("None of the above")
+  val all       = Value("We are all Satoshi (except Craig)")
   val neverKnow = Value("The world will never know")
 }
 
@@ -76,7 +76,7 @@ object Querying {
 
   def htmlResults(block: Voting.BlockHash, results: Vector[Int]): Elem = XML.loadString(
     s"""|<span>
-        |  <h1>Results as of block: $block</h1>
+        |  <h1>Results as of block $block:</h1>
         |  <table border="1">
         |    <tr>
         |      <th>Rank</th>
@@ -179,7 +179,7 @@ object Radio {
     "dave"      -> 2,
     "gov"       -> 3,
     "craig"     -> 4,
-    "none"      -> 5,
+    "all"       -> 5,
     "neverKnow" -> 6
   )
 
