@@ -531,6 +531,6 @@ lazy val casperlabs = (project in file("."))
     node,
     shared,
     smartContracts,
-    client,
-    votingDapp
+    client
+    //votingDapp
   )
