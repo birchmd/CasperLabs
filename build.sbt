@@ -390,14 +390,14 @@ lazy val smartContracts = (project in file("smart-contracts"))
 
 lazy val votingDapp = (project in file("voting-dapp"))
   .settings(commonSettings: _*)
-  .enablePlugins(AppenginePlugin)
+  //.enablePlugins(AppenginePlugin)
   .settings(
     name := "voting-dapp",
     version := "0.0.1-SNAPSHOT",
     libraryDependencies ++= commonDependencies ++ protobufLibDependencies ++ Seq(
       "net.liftweb" %% "lift-webkit" % "3.3.0" % "compile",
-      "net.liftweb" %% "lift-mapper" % "3.3.0" % "compile",
-      "org.mortbay.jetty" % "jetty" % "6.1.22" % "container" //for AppenginePlugin
+      "net.liftweb" %% "lift-mapper" % "3.3.0" % "compile"
+      //"org.mortbay.jetty" % "jetty" % "6.1.22" % "container" //for AppenginePlugin
     ),
   )
   .dependsOn(client)
