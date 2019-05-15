@@ -169,7 +169,9 @@ pub struct LmdbEnvironment {
 
 impl LmdbEnvironment {
     pub fn new(path: &PathBuf) -> Result<Self, error::Error> {
-        let env = Environment::new().open(path)?;
+        let env = Environment::new()
+            .set_map_size(1_048_576_000)
+            .open(path)?;
         let path = path.to_owned();
         Ok(LmdbEnvironment { path, env })
     }
