@@ -482,7 +482,7 @@ object MultiParentCasperImpl {
       dag: BlockDagRepresentation[F]
   ): F[Vector[BlockHash]] =
     for {
-      tips <- tipHashes.values.toVector
+      tips <- tipHashes.values.toVector.distinct
                .sortBy(PrettyPrinter.buildStringNoLimit)
                .traverse(dag.lookup)
                .map(_.flatten)
