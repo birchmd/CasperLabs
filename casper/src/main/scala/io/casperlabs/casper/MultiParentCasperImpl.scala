@@ -486,10 +486,13 @@ object MultiParentCasperImpl {
                .sortBy(PrettyPrinter.buildStringNoLimit)
                .traverse(dag.lookup)
                .map(_.flatten)
-      order    <- dag.deriveOrdering(0L)
-      unc      <- DagOperations.uncommonAncestors[F](tips, dag)(Monad[F], order)
-      filtered = tips.filter(unc.contains)
-    } yield filtered.map(_.blockHash)
+      result <- if (tips.length > 1) for {
+                 order    <- dag.deriveOrdering(0L)
+                 unc      <- DagOperations.uncommonAncestors[F](tips, dag)(Monad[F], order)
+                 filtered = tips.filter(unc.contains)
+               } yield filtered.map(_.blockHash)
+               else tips.map(_.blockHash).pure[F]
+    } yield result
 
   // TODO: Mateusz will move this to its own place.
   val version = 1L
