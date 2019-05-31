@@ -474,7 +474,7 @@ object Validate {
 
     for {
       latestMessagesHashes <- ProtoUtil.toLatestMessageHashes(b.justifications).pure[F]
-      tipHashes            = latestMessagesHashes.values.toVector.sortBy(PrettyPrinter.buildStringNoLimit)
+      tipHashes            <- MultiParentCasperImpl.tempEstimator[F](latestMessagesHashes, dag)
       _                    <- Log[F].debug(s"Estimated tips are ${printHashes(tipHashes)}")
       tips                 <- tipHashes.toVector.traverse(ProtoUtil.unsafeGetBlock[F])
       merged               <- ExecEngineUtil.merge[F](tips, dag)

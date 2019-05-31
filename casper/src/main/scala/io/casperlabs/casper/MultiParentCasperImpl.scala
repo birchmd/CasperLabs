@@ -268,13 +268,11 @@ class MultiParentCasperImpl[F[_]: Sync: Log: Time: SafetyOracle: BlockStore: Blo
   def createBlock: F[CreateBlockStatus] = validatorId match {
     case Some(ValidatorIdentity(publicKey, privateKey, sigAlgorithm)) =>
       for {
-        dag <- blockDag
-        tipHashes <- dag.latestMessageHashes.map(
-                      _.values.toVector.sortBy(PrettyPrinter.buildStringNoLimit)
-                    )
-        tips    <- tipHashes.traverse(ProtoUtil.unsafeGetBlock[F])
-        merged  <- ExecEngineUtil.merge[F](tips, dag)
-        parents = merged.parents
+        dag       <- blockDag
+        tipHashes <- dag.latestMessageHashes.flatMap(MultiParentCasperImpl.tempEstimator(_, dag))
+        tips      <- tipHashes.traverse(ProtoUtil.unsafeGetBlock[F])
+        merged    <- ExecEngineUtil.merge[F](tips, dag)
+        parents   = merged.parents
         _ <- Log[F].info(
               s"${parents.size} parents out of ${tipHashes.size} latest blocks will be used."
             )
@@ -478,6 +476,20 @@ class MultiParentCasperImpl[F[_]: Sync: Log: Time: SafetyOracle: BlockStore: Blo
 }
 
 object MultiParentCasperImpl {
+  import io.casperlabs.casper.Estimator.{BlockHash, Validator}
+  def tempEstimator[F[_]: Monad](
+      tipHashes: Map[Validator, BlockHash],
+      dag: BlockDagRepresentation[F]
+  ): F[Vector[BlockHash]] =
+    for {
+      tips <- tipHashes.values.toVector
+               .sortBy(PrettyPrinter.buildStringNoLimit)
+               .traverse(dag.lookup)
+               .map(_.flatten)
+      order    <- dag.deriveOrdering(0L)
+      unc      <- DagOperations.uncommonAncestors[F](tips, dag)(Monad[F], order)
+      filtered = tips.filter(unc.contains)
+    } yield filtered.map(_.blockHash)
 
   // TODO: Mateusz will move this to its own place.
   val version = 1L
