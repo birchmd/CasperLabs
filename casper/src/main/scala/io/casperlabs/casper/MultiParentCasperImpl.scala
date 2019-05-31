@@ -231,11 +231,28 @@ class MultiParentCasperImpl[F[_]: Sync: Log: Time: SafetyOracle: BlockStore: Blo
           .flatMapF(_ => addDeploy(deployData) map (_.asRight[Throwable]))
           .value
       // TODO: Genesis doesn't have payment code; does it come here?
-      case (None, _) | (_, None) =>
+
+      case (Some(_), None) =>
         Either
           .left[Throwable, Unit](
             // TODO: Use IllegalArgument from comms.
-            new IllegalArgumentException(s"Deploy was missing session and/or payment code.")
+            new IllegalArgumentException(s"Deploy was missing payment argument.")
+          )
+          .pure[F]
+
+      case (None, Some(_)) =>
+        Either
+          .left[Throwable, Unit](
+            // TODO: Use IllegalArgument from comms.
+            new IllegalArgumentException(s"Deploy was missing session argument.")
+          )
+          .pure[F]
+
+      case (None, None) =>
+        Either
+          .left[Throwable, Unit](
+            // TODO: Use IllegalArgument from comms.
+            new IllegalArgumentException(s"Deploy was missing session AND payment code.")
           )
           .pure[F]
     }
