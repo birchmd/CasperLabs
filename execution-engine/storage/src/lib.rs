@@ -17,9 +17,9 @@ extern crate lazy_static;
 #[cfg(test)]
 extern crate proptest;
 
+extern crate core;
 #[cfg(test)]
 extern crate tempfile;
-extern crate core;
 
 pub mod error;
 pub mod global_state;

@@ -129,9 +129,17 @@ where
     ) -> grpc::SingleResponse<ipc::CommitResponse> {
         // TODO: don't unwrap
         let prestate_hash: Blake2bHash = p.get_prestate_hash().try_into().unwrap();
-        let effects_result: Result<HashMap<Key, Transform>, ParsingError> =
+        let effects_seq_result: Result<Vec<(Key, Transform)>, ParsingError> =
             p.get_effects().iter().map(TryInto::try_into).collect();
-        match effects_result {
+        let effects_map_result: Result<HashMap<Key, Transform>, ParsingError> = effects_seq_result
+            .map(|vec| {
+                let mut map = HashMap::new();
+                for (k, v) in vec {
+                    execution_engine::utils::add(&mut map, k, v);
+                }
+                map
+            });
+        match effects_map_result {
             Err(ParsingError(error_message)) => {
                 let mut res = ipc::CommitResponse::new();
                 let mut err = ipc::PostEffectsError::new();

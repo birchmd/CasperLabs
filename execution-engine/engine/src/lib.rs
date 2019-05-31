@@ -22,7 +22,7 @@ pub mod execution;
 pub mod runtime_context;
 pub mod trackingcopy;
 
-mod utils;
+pub mod utils;
 
 #[cfg(test)]
 #[macro_use]
