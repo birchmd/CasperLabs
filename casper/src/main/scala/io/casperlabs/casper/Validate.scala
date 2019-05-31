@@ -234,7 +234,6 @@ object Validate {
       _ <- Validate.deployCount[F](block)
       _ <- Validate.missingBlocks[F](block, dag)
       _ <- Validate.timestamp[F](block, dag)
-      _ <- Validate.repeatDeploy[F](block, dag)
       _ <- Validate.blockNumber[F](block, dag)
       _ <- Validate.sequenceNumber[F](block, dag)
       _ <- Validate.shardIdentifier[F](block, shardId)
@@ -262,48 +261,6 @@ object Validate {
                  } yield ()
                }
     } yield result
-
-  /**
-    * Validate no deploy by the same (user, millisecond timestamp)
-    * has been produced in the chain
-    *
-    * Agnostic of non-parent justifications
-    */
-  def repeatDeploy[F[_]: MonadThrowable: Log: BlockStore: RaiseValidationError](
-      block: BlockMessage,
-      dag: BlockDagRepresentation[F]
-  ): F[Unit] = {
-    val deployKeySet = (for {
-      bd <- block.body.toList
-      d  <- bd.deploys.flatMap(_.deploy)
-    } yield (d.user, d.timestamp)).toSet
-
-    for {
-      initParents <- ProtoUtil.unsafeGetParents[F](block)
-      duplicatedBlock <- DagOperations
-                          .bfTraverseF[F, BlockMessage](initParents)(ProtoUtil.unsafeGetParents[F])
-                          .find(
-                            _.body.exists(
-                              _.deploys
-                                .flatMap(_.deploy)
-                                .exists(p => deployKeySet.contains((p.user, p.timestamp)))
-                            )
-                          )
-      _ <- duplicatedBlock match {
-            case Some(b) =>
-              for {
-                _ <- Log[F].warn(
-                      ignore(
-                        block,
-                        s"found deploy by the same (user, millisecond timestamp) produced in the block(${b.blockHash})"
-                      )
-                    )
-                _ <- RaiseValidationError[F].raise[Unit](InvalidRepeatDeploy)
-              } yield Left(InvalidRepeatDeploy)
-            case None => Applicative[F].unit
-          }
-    } yield ()
-  }
 
   // This is not a slashable offence
   def timestamp[F[_]: MonadThrowable: Log: Time: BlockStore: RaiseValidationError](
