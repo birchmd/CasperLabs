@@ -66,7 +66,7 @@ object ExecEngineUtil {
             .info(s"Block #$number created with effects:\n$msgBody")
     } yield DeploysCheckpoint(preStateHash, postStateHash, deploysForBlock, number, protocolVersion)
 
-  def processDeploys[F[_]: MonadError[?[_], Throwable]: BlockStore: ExecutionEngineService](
+  def processDeploys[F[_]: Log: MonadError[?[_], Throwable]: BlockStore: ExecutionEngineService](
       prestate: StateHash,
       deploys: Seq[DeployData],
       protocolVersion: ProtocolVersion
@@ -74,6 +74,11 @@ object ExecEngineUtil {
     ExecutionEngineService[F]
       .exec(prestate, deploys.map(ProtoUtil.deployDataToEEDeploy), protocolVersion)
       .rethrow
+      .flatMap { processedDeploys =>
+        processedDeploys.toVector
+          .traverse(d => Log[F].info(s"Deploy result: $d"))
+          .map(_ => processedDeploys)
+      }
 
   /** Produce effects for each processed deploy. */
   def processedDeployEffects(
@@ -92,7 +97,7 @@ object ExecEngineUtil {
   def findCommutingEffects(
       deployEffects: Seq[(DeployData, Long, Option[ExecutionEffect])]
   ): Seq[(DeployData, Long, Option[ExecutionEffect])] = {
-    val (errors, errorFree) = deployEffects.span(_._3.isEmpty)
+    val (errors, errorFree) = deployEffects.partition(_._3.isEmpty)
 
     val nonConflicting = errorFree.toList match {
       case Nil                           => Nil
@@ -135,7 +140,7 @@ object ExecEngineUtil {
   ): Seq[TransformEntry] =
     commutingEffects.collect { case (_, _, Some(eff)) => eff.transformMap }.flatten
 
-  def effectsForBlock[F[_]: Sync: BlockStore: ExecutionEngineService](
+  def effectsForBlock[F[_]: Sync: Log: BlockStore: ExecutionEngineService](
       block: BlockMessage,
       prestate: StateHash,
       dag: BlockDagRepresentation[F]
