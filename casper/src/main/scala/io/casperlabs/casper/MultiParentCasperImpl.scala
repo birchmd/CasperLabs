@@ -268,11 +268,13 @@ class MultiParentCasperImpl[F[_]: Sync: Log: Time: SafetyOracle: BlockStore: Blo
   def createBlock: F[CreateBlockStatus] = validatorId match {
     case Some(ValidatorIdentity(publicKey, privateKey, sigAlgorithm)) =>
       for {
-        dag       <- blockDag
-        tipHashes <- estimator(dag).map(_.toVector)
-        tips      <- tipHashes.traverse(ProtoUtil.unsafeGetBlock[F])
-        merged    <- ExecEngineUtil.merge[F](tips, dag)
-        parents   = merged.parents
+        dag <- blockDag
+        tipHashes <- dag.latestMessageHashes.map(
+                      _.values.toVector.sortBy(PrettyPrinter.buildStringNoLimit)
+                    )
+        tips    <- tipHashes.traverse(ProtoUtil.unsafeGetBlock[F])
+        merged  <- ExecEngineUtil.merge[F](tips, dag)
+        parents = merged.parents
         _ <- Log[F].info(
               s"${parents.size} parents out of ${tipHashes.size} latest blocks will be used."
             )
