@@ -59,6 +59,28 @@ object DagOperations {
     )
   }
 
+  /**
+    * Returns `true` when there is a path through the main tree from `largerRank` to `smallerRank`.
+    */
+  def isMainAncestor[F[_]: Monad](
+      smallerRank: Message,
+      largerRank: Message,
+      dag: DagRepresentation[F]
+  ): F[Boolean] =
+    if (smallerRank.rank > largerRank.rank) false.pure[F]
+    else if (smallerRank.messageHash == largerRank.messageHash) true.pure[F]
+    else
+      Monad[F].tailRecM(largerRank) { message =>
+        val parentHash = message.parentBlock
+
+        if (parentHash == smallerRank.messageHash) Right(true).leftCast[Message].pure[F]
+        else
+          dag.lookup(parentHash) map {
+            case None         => Right(false)
+            case Some(parent) => Left(parent)
+          }
+      }
+
   /** Traverses j-past-cone of the block and returns messages by specified validator.
     */
   def swimlaneV[F[_]: Monad](

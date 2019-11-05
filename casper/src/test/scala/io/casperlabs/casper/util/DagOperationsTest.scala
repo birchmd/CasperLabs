@@ -451,6 +451,45 @@ class DagOperationsTest extends FlatSpec with Matchers with BlockGenerator with 
       } yield ()
   }
 
+  "isMainAncestor" should "correctly identify when one block is a main ancestor of another" in withStorage {
+    implicit blockStorage => implicit dagStorage => implicit deployStorage =>
+      def isMainAncestor(b1: Block, b2: Block, dag: DagRepresentation[Task]): Task[Boolean] =
+        for {
+          m1     <- dag.lookup(b1.blockHash).map(_.get)
+          m2     <- dag.lookup(b2.blockHash).map(_.get)
+          result <- DagOperations.isMainAncestor(m1, m2, dag)
+        } yield result
+      /*
+       * DAG Looks like this:
+       *
+       *        b6   b7
+       *       |  \ /  \
+       *       |   b4  b5
+       *       |    \ /
+       *       b2    b3
+       *         \  /
+       *          b1
+       *           |
+       *         genesis
+       */
+      for {
+        genesis <- createAndStoreBlock[Task](Seq.empty)
+        b1      <- createAndStoreBlock[Task](Seq(genesis.blockHash))
+        b2      <- createAndStoreBlock[Task](Seq(b1.blockHash))
+        b3      <- createAndStoreBlock[Task](Seq(b1.blockHash))
+        b4      <- createAndStoreBlock[Task](Seq(b3.blockHash))
+        b5      <- createAndStoreBlock[Task](Seq(b3.blockHash))
+        b6      <- createAndStoreBlock[Task](Seq(b2.blockHash, b4.blockHash))
+        b7      <- createAndStoreBlock[Task](Seq(b4.blockHash, b5.blockHash))
+        dag     <- dagStorage.getRepresentation
+        _       <- isMainAncestor(genesis, genesis, dag) shouldBeF true
+        _       <- isMainAncestor(genesis, b7, dag) shouldBeF true
+        _       <- isMainAncestor(b7, genesis, dag) shouldBeF false
+        _       <- isMainAncestor(b2, b6, dag) shouldBeF true
+        _       <- isMainAncestor(b3, b6, dag) shouldBeF false
+      } yield ()
+  }
+
   "swimlaneV" should "return correct stream of blocks even if they are referenced indirectly" in withStorage {
     implicit blockStorage => implicit dagStorage => _ =>
       val v1    = generateValidator("v1")
