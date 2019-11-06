@@ -194,7 +194,7 @@ class ForkchoiceTest
                HashMap(v1 -> b3.blockHash, v2 -> b2.blockHash, v3 -> genesis.blockHash)
              )
         b6 <- createAndStoreBlock[Task](
-               Seq(b4.blockHash),
+               Seq(b3.blockHash),
                v1,
                bonds,
                HashMap(v1 -> b3.blockHash, v2 -> b2.blockHash, v3 -> b4.blockHash)
