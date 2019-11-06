@@ -691,8 +691,8 @@ class ValidationTest
         b3 <- createValidatorBlock[Task](Seq(b0), bonds, Seq(b0), v2)
         b4 <- createValidatorBlock[Task](Seq(b1), bonds, Seq(b1), v0)
         b5 <- createValidatorBlock[Task](Seq(b3, b2, b1), bonds, Seq(b1, b2, b3), v1)
-        b6 <- createValidatorBlock[Task](Seq(b5, b4), bonds, Seq(b1, b4, b5), v0)
-        b7 <- createValidatorBlock[Task](Seq(b4), bonds, Seq(b1, b4, b5), v1) //not highest score parent
+        b6 <- createValidatorBlock[Task](Seq(b5, b4), bonds, Seq(b4, b5, b3), v0)
+        b7 <- createValidatorBlock[Task](Seq(b4), bonds, Seq(b4, b5, b3), v1) //not highest score parent
         b8 <- createValidatorBlock[Task](Seq(b1, b2, b3), bonds, Seq(b1, b2, b3), v2) //parents wrong order
         b9 <- createValidatorBlock[Task](Seq(b6), bonds, Seq.empty, v0)
                .map(b => b.withHeader(b.getHeader.withJustifications(Seq.empty))) //empty justification
