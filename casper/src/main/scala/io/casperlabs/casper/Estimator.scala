@@ -10,6 +10,7 @@ import io.casperlabs.catscontrib.MonadThrowable
 import io.casperlabs.metrics.Metrics
 import io.casperlabs.metrics.implicits._
 import io.casperlabs.models.{Message, Weight}
+import io.casperlabs.shared.StreamT
 import io.casperlabs.storage.dag.DagRepresentation
 
 import scala.collection.immutable.Map
@@ -95,25 +96,23 @@ object Estimator {
       .map(_.collect { case (v, Some(m)) => v -> m })
 
   /**
-    * Finds the latest message of validator `v` voting for block `b`, if any.
+    * Finds the main child of `b` that `v` votes for, if any.
     */
-  private def latestMessageForBlock[F[_]: MonadThrowable](
+  private def voteForChild[F[_]: MonadThrowable](
       b: BlockHash,
       v: Validator,
       latestMessage: Message,
       dag: DagRepresentation[F]
-  ): F[Option[Message]] =
-    DagOperations
-      .swimlaneV[F](v, latestMessage, dag)
-      .findF(isMainAncestor(b, _, dag))
+  ): F[Option[Message]] = dag.lookup(b) flatMap {
+    case None => none[Message].pure[F]
 
-  private def isMainAncestor[F[_]: MonadThrowable](
-      smallerRank: BlockHash,
-      largerRank: Message,
-      dag: DagRepresentation[F]
-  ): F[Boolean] = dag.lookup(smallerRank) flatMap {
-    case None          => false.pure[F]
-    case Some(message) => DagOperations.isMainAncestor(message, largerRank, dag)
+    case Some(message) =>
+      DagOperations
+        .swimlaneV[F](v, latestMessage, dag)
+        .takeWhile(_.rank > message.rank)
+        .flatMap(lm => StreamT.lift(DagOperations.findMainAncestor[F](message, lm, dag)))
+        .find(_.nonEmpty)
+        .map(_.flatten)
   }
 
   private def forkChoiceLoop[F[_]: MonadThrowable](
@@ -159,36 +158,23 @@ object Estimator {
 
     case children =>
       honestLatestMessages
-        .traverse { case (v, lm) => latestMessageForBlock[F](block, v, lm, dag).map(v -> _) }
-        .map(_.collect { case (v, Some(lm)) if lm.messageHash != block => v -> lm })
-        .flatMap(_.traverse {
-          case (v, latestMessage) =>
+        .traverse {
+          case (v, lm) =>
             for {
+              maybeChild <- voteForChild[F](block, v, lm, dag)
               weight     <- weightFromValidatorByDag[F](dag, block, v)
-              maybeChild <- children.findM(child => isMainAncestor[F](child, latestMessage, dag))
-              child <- maybeChild.fold(
-                        // This case should never happen because if `latestMessageForBlock`
-                        // returned `Some(latestMessage)` then `block` is an ancestor of
-                        // `latestMessage`, which means either one of the children of `block`
-                        // must also be an ancestor of `latestMessage`, or `latestMessage`
-                        // equals `block`. The latter case is taken care of in the
-                        // `collect` statement where we explicitly filter out latest messages
-                        // equal to the current block. Note that this filtering is valid
-                        // because in that case the validator does not vote for any child.
-                        MonadThrowable[F].raiseError[BlockHash](
-                          new Exception("Latest message votes for no child!")
-                        )
-                      )(child => child.pure[F])
-            } yield (child, weight)
-        }.map { votes =>
+            } yield (weight, maybeChild)
+        }
+        .map { votes =>
           val scores = votes
+            .collect { case (w, Some(child)) => child.messageHash -> w }
             .groupBy(_._1)
             .mapValues(_.foldLeft(Zero) { case (acc, (_, weight)) => acc + weight })
 
           children.sortBy(child => scores.getOrElse(child, Zero) -> child.toStringUtf8)(
             Ordering[(BigInt, String)].reverse
           )
-        })
+        }
   }
 
   private case class DagView[F[_]](dag: DagRepresentation[F], latestMessages: Set[Message]) {

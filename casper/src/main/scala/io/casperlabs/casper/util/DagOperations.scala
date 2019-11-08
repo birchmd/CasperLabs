@@ -60,27 +60,39 @@ object DagOperations {
   }
 
   /**
-    * Returns `true` when there is a path through the main tree from `largerRank` to `smallerRank`.
+    * Returns `Some(block)` when there is a path from `start` to `target` along the main tree
+    * where the last step is `block -> target`. Returns `None` when there is no such path.
     */
-  def isMainAncestor[F[_]: Monad](
-      smallerRank: Message,
-      largerRank: Message,
+  def findMainAncestor[F[_]: Monad](
+      target: Message,
+      start: Message,
       dag: DagRepresentation[F]
-  ): F[Boolean] =
-    if (smallerRank.rank > largerRank.rank) false.pure[F]
-    else if (smallerRank.messageHash == largerRank.messageHash) true.pure[F]
+  ): F[Option[Message]] =
+    if (target.rank >= start.rank) none[Message].pure[F]
     else
-      Monad[F].tailRecM(largerRank) { message =>
+      Monad[F].tailRecM(start) { message =>
         val parentHash = message.parentBlock
 
-        if (parentHash == smallerRank.messageHash) Right(true).leftCast[Message].pure[F]
-        else if (smallerRank.rank > message.rank) Right(false).leftCast[Message].pure[F]
+        if (parentHash == target.messageHash) Right(message.some).leftCast[Message].pure[F]
+        else if (target.rank > message.rank) Right(none[Message]).leftCast[Message].pure[F]
         else
           dag.lookup(parentHash) map {
-            case None         => Right(false)
+            case None         => Right(none[Message])
             case Some(parent) => Left(parent)
           }
       }
+
+  /**
+    * Returns `true` when there is a (possibly empty) path through the
+    * main tree from `largerRank` to `smallerRank`.
+    */
+  def isMainAncestor[F[_]: Monad](
+      target: Message,
+      start: Message,
+      dag: DagRepresentation[F]
+  ): F[Boolean] =
+    if (start.messageHash == target.messageHash) true.pure[F]
+    else findMainAncestor(target, start, dag).map(_.nonEmpty)
 
   /** Traverses j-past-cone of the block and returns messages by specified validator.
     */
