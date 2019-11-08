@@ -7,6 +7,8 @@ import com.google.protobuf.ByteString
 import io.casperlabs.casper.util.DagOperations
 import io.casperlabs.casper.util.ProtoUtil.weightFromValidatorByDag
 import io.casperlabs.catscontrib.MonadThrowable
+import io.casperlabs.metrics.Metrics
+import io.casperlabs.metrics.implicits._
 import io.casperlabs.models.{Message, Weight}
 import io.casperlabs.storage.dag.DagRepresentation
 
@@ -18,7 +20,10 @@ object Estimator {
 
   import Weight._
 
-  def tips[F[_]: MonadThrowable](
+  implicit val metricsSource   = CasperMetricsSource
+  implicit val decreasingOrder = Ordering[Long].reverse
+
+  def tips[F[_]: MonadThrowable: Metrics](
       dag: DagRepresentation[F],
       genesis: BlockHash,
       latestMessageHashes: Map[Validator, Set[BlockHash]],
@@ -30,13 +35,15 @@ object Estimator {
 
         case Some(tips) =>
           for {
-            lca <- DagOperations.latestCommonAncestorsMainParent(dag, tips.map(_.messageHash))
+            lca <- DagOperations
+                    .latestCommonAncestorsMainParent(dag, tips.map(_.messageHash))
+                    .timer("calculateLCA")
             honestValidators <- latestHashesToLatestMessage[F](
                                  dag,
                                  latestMessageHashes,
                                  equivocators
                                )
-            result <- forkChoiceLoop(List(lca), honestValidators, view, dag)
+            result <- forkChoiceLoop(List(lca), honestValidators, view, dag).timer("forkChoiceLoop")
             secondaryParents <- filterSecondaryParents[F](
                                  result.head,
                                  result.tail,
