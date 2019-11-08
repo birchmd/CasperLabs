@@ -20,8 +20,7 @@ object Estimator {
 
   import Weight._
 
-  implicit val metricsSource   = CasperMetricsSource
-  implicit val decreasingOrder = Ordering[Long].reverse
+  implicit val metricsSource = CasperMetricsSource
 
   def tips[F[_]: MonadThrowable: Metrics](
       dag: DagRepresentation[F],
