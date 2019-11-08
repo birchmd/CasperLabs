@@ -444,6 +444,18 @@ object DagOperations {
       dag.children(blockHash).map(_.toList)
     }
 
+  /** Check if a path in the j-DAG exists from starting messages to target messages. */
+  def anyJustificationPathExists[F[_]: Monad](
+      dag: DagRepresentation[F],
+      start: Set[Message],
+      targets: Set[Message]
+  ): F[Boolean] =
+    anyPathExists(start, targets)(
+      _.justifications.toList
+        .traverse(j => dag.lookup(j.latestBlockHash))
+        .map(_.flatten)
+    )
+
   /** Collect all block hashes from the ancestor candidates through which can reach any of the descendants. */
   def collectWhereDescendantPathExists[F[_]: MonadThrowable](
       dag: DagRepresentation[F],

@@ -202,15 +202,7 @@ object Estimator {
 
         case Some(message) =>
           if (message.rank > maxRank) false.pure[F]
-          else
-            DagOperations.anyPathExists[F, Message](
-              latestMessages,
-              Set(message)
-            )(
-              _.justifications.toList
-                .traverse(j => dag.lookup(j.latestBlockHash))
-                .map(_.flatten)
-            )
+          else DagOperations.anyJustificationPathExists[F](dag, latestMessages, Set(message))
       }
   }
 
