@@ -24,32 +24,53 @@ object Estimator {
       latestMessageHashes: Map[Validator, Set[BlockHash]],
       equivocators: Set[Validator]
   ): F[List[BlockHash]] =
-    latestHashesToLatestMessage[F](dag, latestMessageHashes, equivocators) flatMap {
-      honestValidators =>
-        val honestTips = honestValidators.map(_._2.messageHash)
+    DagView.fromLatestMessageHashes[F](latestMessageHashes, dag) flatMap { view =>
+      NonEmptyList.fromList(view.latestMessages.toList) match {
+        case None => List(genesis).pure[F]
 
-        NonEmptyList.fromList(honestTips) match {
-          case None => List(genesis).pure[F]
-
-          case Some(tips) =>
-            for {
-              lca    <- DagOperations.latestCommonAncestorsMainParent(dag, tips)
-              result <- forkChoiceLoop(List(lca), honestValidators, dag)
-              // Since the fork-choice rule only looks at main parents, it is
-              // possible that some of the chosen secondary parents are reachable
-              // from the chosen main parent. Therefore, we look for and remove
-              // and such redundancies. Note that it may also be the case that
-              // some blocks in the secondary parents are redundant amongst
-              // themselves, however we do not remove them at this stage since
-              // they may or may not be used during merging.
-              redundancies <- DagOperations.collectWhereDescendantPathExists[F](
-                               dag,
-                               result.tail.toSet,
-                               Set(result.head)
-                             )
-            } yield result.filter(!redundancies(_))
-        }
+        case Some(tips) =>
+          for {
+            lca <- DagOperations.latestCommonAncestorsMainParent(dag, tips.map(_.messageHash))
+            honestValidators <- latestHashesToLatestMessage[F](
+                                 dag,
+                                 latestMessageHashes,
+                                 equivocators
+                               )
+            result <- forkChoiceLoop(List(lca), honestValidators, view, dag)
+            secondaryParents <- filterSecondaryParents[F](
+                                 result.head,
+                                 result.tail,
+                                 equivocators,
+                                 dag
+                               )
+          } yield result.head :: secondaryParents
+      }
     }
+
+  private def filterSecondaryParents[F[_]: MonadThrowable](
+      primaryParent: BlockHash,
+      secondaryParents: List[BlockHash],
+      equivocators: Set[Validator],
+      dag: DagRepresentation[F]
+  ): F[List[BlockHash]] =
+    for {
+      // cannot choose blocks from equivocators as secondary parents
+      honestParents <- secondaryParents
+                        .traverse(dag.lookup)
+                        .map(_.flatten.filter(m => !equivocators(m.validatorId)).map(_.messageHash))
+      // Since the fork-choice rule only looks at main parents, it is
+      // possible that some of the chosen secondary parents are reachable
+      // from the chosen main parent. Therefore, we look for and remove
+      // and such redundancies. Note that it may also be the case that
+      // some blocks in the secondary parents are redundant amongst
+      // themselves, however we do not remove them at this stage since
+      // they may or may not be used during merging.
+      redundancies <- DagOperations.collectWhereDescendantPathExists[F](
+                       dag,
+                       honestParents.toSet,
+                       Set(primaryParent)
+                     )
+    } yield honestParents.filter(!redundancies(_))
 
   /**
     * Looks up the latest message for each honest validator from
@@ -92,17 +113,18 @@ object Estimator {
   private def forkChoiceLoop[F[_]: MonadThrowable](
       result: List[BlockHash],
       honestLatestMessages: List[(Validator, Message)],
+      view: DagView[F],
       dag: DagRepresentation[F]
   ): F[List[BlockHash]] =
     result
       .traverse { block =>
-        orderChildren[F](block, honestLatestMessages, dag)
+        orderChildren[F](block, honestLatestMessages, view, dag)
       }
       .flatMap { orderedChildren =>
         val newResult = orderedChildren.flatten
 
         if (result == newResult) result.pure[F]
-        else forkChoiceLoop(newResult, honestLatestMessages, dag)
+        else forkChoiceLoop(newResult, honestLatestMessages, view, dag)
       }
 
   /**
@@ -111,16 +133,10 @@ object Estimator {
     */
   private def getMainChildrenInView[F[_]: MonadThrowable](
       block: BlockHash,
-      honestLatestMessages: List[(Validator, Message)],
-      dag: DagRepresentation[F]
-  ): F[List[BlockHash]] = dag.getMainChildren(block) flatMap { children =>
-    val lms = honestLatestMessages.map(_._2)
-
-    // keep children which can be reached from latest message justifications
-    children.filterA { child =>
-      DagOperations.toposortJDagDesc[F](dag, lms).find(m => m.messageHash == child).map(_.nonEmpty)
-    }
-  }
+      view: DagView[F]
+  ): F[List[BlockHash]] = view.dag.getMainChildren(block) flatMap (
+    _.filterA(view.inView)
+  )
 
   /**
     * Orders the children of `block` by how much weight votes for each of them
@@ -130,8 +146,9 @@ object Estimator {
   private def orderChildren[F[_]: MonadThrowable](
       block: BlockHash,
       honestLatestMessages: List[(Validator, Message)],
+      view: DagView[F],
       dag: DagRepresentation[F]
-  ): F[List[BlockHash]] = getMainChildrenInView[F](block, honestLatestMessages, dag) flatMap {
+  ): F[List[BlockHash]] = getMainChildrenInView[F](block, view) flatMap {
     case Nil => List(block).pure[F]
 
     case children =>
@@ -166,5 +183,42 @@ object Estimator {
             Ordering[(BigInt, String)].reverse
           )
         })
+  }
+
+  private case class DagView[F[_]](dag: DagRepresentation[F], latestMessages: Set[Message]) {
+    private val maxRank =
+      if (latestMessages.isEmpty) 0L
+      else latestMessages.map(_.rank).max
+
+    def inView(blockHash: BlockHash)(implicit monad: Monad[F]): F[Boolean] =
+      dag.lookup(blockHash) flatMap {
+        case None => false.pure[F]
+
+        case Some(message) =>
+          if (message.rank > maxRank) false.pure[F]
+          else
+            DagOperations.anyPathExists[F, Message](
+              latestMessages,
+              Set(message)
+            )(
+              _.justifications.toList
+                .traverse(j => dag.lookup(j.latestBlockHash))
+                .map(_.flatten)
+            )
+      }
+  }
+
+  private object DagView {
+    def fromLatestMessageHashes[F[_]: cats.Applicative](
+        latestMessageHashes: Map[Validator, Set[BlockHash]],
+        dag: DagRepresentation[F]
+    ): F[DagView[F]] =
+      latestMessageHashes.values
+        .foldLeft(Set.empty[BlockHash]) {
+          case (acc, ms) => acc union ms
+        }
+        .toList
+        .traverse(dag.lookup)
+        .map(lms => DagView[F](dag, lms.flatten.toSet))
   }
 }

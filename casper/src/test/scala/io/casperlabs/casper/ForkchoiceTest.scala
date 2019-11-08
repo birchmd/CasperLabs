@@ -255,7 +255,7 @@ class ForkchoiceTest
                  latestMessageHashes,
                  equivocators
                )
-        _ = tips.head shouldBe b.blockHash
+        _ = tips.head shouldBe c.blockHash
       } yield ()
   }
 
