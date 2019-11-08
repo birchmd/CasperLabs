@@ -74,6 +74,7 @@ object DagOperations {
         val parentHash = message.parentBlock
 
         if (parentHash == smallerRank.messageHash) Right(true).leftCast[Message].pure[F]
+        else if (smallerRank.rank > message.rank) Right(false).leftCast[Message].pure[F]
         else
           dag.lookup(parentHash) map {
             case None         => Right(false)
