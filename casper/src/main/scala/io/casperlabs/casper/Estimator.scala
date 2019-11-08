@@ -61,7 +61,7 @@ object Estimator {
       // Since the fork-choice rule only looks at main parents, it is
       // possible that some of the chosen secondary parents are reachable
       // from the chosen main parent. Therefore, we look for and remove
-      // and such redundancies. Note that it may also be the case that
+      // any such redundancies. Note that it may also be the case that
       // some blocks in the secondary parents are redundant amongst
       // themselves, however we do not remove them at this stage since
       // they may or may not be used during merging.
