@@ -43,7 +43,8 @@ object Estimator {
                                  latestMessageHashes,
                                  equivocators
                                )
-            result <- forkChoiceLoop(List(lca), honestValidators, view).timer("forkChoiceLoop")
+            init   = List(ForkChoiceLoopStatus.continue(lca))
+            result <- forkChoiceLoop(init, honestValidators, view).timer("forkChoiceLoop")
             secondaryParents <- filterSecondaryParents[F](
                                  result.head,
                                  result.tail,
@@ -119,18 +120,22 @@ object Estimator {
   }
 
   private def forkChoiceLoop[F[_]: MonadThrowable](
-      orderedCandidates: List[BlockHash],
+      orderedCandidates: List[ForkChoiceLoopStatus],
       honestLatestMessages: List[(Validator, Message)],
       view: DagView[F]
   ): F[List[BlockHash]] =
     orderedCandidates
-      .traverse { block =>
-        orderChildren[F](block, honestLatestMessages, view)
+      .traverse {
+        case terminal @ ForkChoiceLoopStatus.Terminated(_) =>
+          List[ForkChoiceLoopStatus](terminal).pure[F]
+
+        case ForkChoiceLoopStatus.Continue(block) =>
+          orderChildren[F](block, honestLatestMessages, view)
       }
       .flatMap { orderedChildren =>
         val newCandidates = orderedChildren.flatten
 
-        if (orderedCandidates == newCandidates) orderedCandidates.pure[F]
+        if (orderedCandidates == newCandidates) orderedCandidates.map(_.messageHash).pure[F]
         else forkChoiceLoop(newCandidates, honestLatestMessages, view)
       }
 
@@ -154,8 +159,8 @@ object Estimator {
       block: BlockHash,
       honestLatestMessages: List[(Validator, Message)],
       view: DagView[F]
-  ): F[List[BlockHash]] = getMainChildrenInView[F](block, view) flatMap {
-    case Nil => List(block).pure[F]
+  ): F[List[ForkChoiceLoopStatus]] = getMainChildrenInView[F](block, view) flatMap {
+    case Nil => List(ForkChoiceLoopStatus.terminated(block)).pure[F]
 
     case children =>
       honestLatestMessages
@@ -175,9 +180,11 @@ object Estimator {
             .groupBy(_._1)
             .mapValues(_.foldLeft(Zero) { case (acc, (_, weight)) => acc + weight })
 
-          children.sortBy(child => scores.getOrElse(child, Zero) -> child.toStringUtf8)(
-            Ordering[(BigInt, String)].reverse
-          )
+          children
+            .sortBy(child => scores.getOrElse(child, Zero) -> child.toStringUtf8)(
+              Ordering[(BigInt, String)].reverse
+            )
+            .map(ForkChoiceLoopStatus.continue)
         }
   }
 
@@ -208,5 +215,22 @@ object Estimator {
         .toList
         .traverse(dag.lookup)
         .map(lms => DagView[F](dag, lms.flatten.toSet))
+  }
+
+  /**
+    * Helper newtype class for bookkeeping during the fork-choice loop.
+    * If we know a block is a tip of the main tree then we mark it as
+    * `Terminated` and no longer call `orderChildren` on it.
+    */
+  private sealed trait ForkChoiceLoopStatus {
+    val messageHash: BlockHash
+  }
+
+  private object ForkChoiceLoopStatus {
+    def terminated(b: BlockHash): ForkChoiceLoopStatus = Terminated(b)
+    def continue(b: BlockHash): ForkChoiceLoopStatus   = Continue(b)
+
+    case class Terminated(messageHash: BlockHash) extends ForkChoiceLoopStatus
+    case class Continue(messageHash: BlockHash)   extends ForkChoiceLoopStatus
   }
 }
