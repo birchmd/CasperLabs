@@ -33,10 +33,10 @@ object Estimator {
       NonEmptyList.fromList(view.latestMessages.toList) match {
         case None => List(genesis).pure[F]
 
-        case Some(tips) =>
+        case Some(latestMessages) =>
           for {
             lca <- DagOperations
-                    .latestCommonAncestorsMainParent(dag, tips.map(_.messageHash))
+                    .latestCommonAncestorsMainParent(dag, latestMessages.map(_.messageHash))
                     .timer("calculateLCA")
             honestValidators <- latestHashesToLatestMessage[F](
                                  dag,
