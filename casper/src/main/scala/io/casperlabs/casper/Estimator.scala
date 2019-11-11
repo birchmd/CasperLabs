@@ -119,20 +119,20 @@ object Estimator {
   }
 
   private def forkChoiceLoop[F[_]: MonadThrowable](
-      result: List[BlockHash],
+      orderedCandidates: List[BlockHash],
       honestLatestMessages: List[(Validator, Message)],
       view: DagView[F],
       dag: DagRepresentation[F]
   ): F[List[BlockHash]] =
-    result
+    orderedCandidates
       .traverse { block =>
         orderChildren[F](block, honestLatestMessages, view, dag)
       }
       .flatMap { orderedChildren =>
-        val newResult = orderedChildren.flatten
+        val newCandidates = orderedChildren.flatten
 
-        if (result == newResult) result.pure[F]
-        else forkChoiceLoop(newResult, honestLatestMessages, view, dag)
+        if (orderedCandidates == newCandidates) orderedCandidates.pure[F]
+        else forkChoiceLoop(newCandidates, honestLatestMessages, view, dag)
       }
 
   /**
