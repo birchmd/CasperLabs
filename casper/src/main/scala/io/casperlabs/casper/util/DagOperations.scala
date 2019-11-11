@@ -84,7 +84,7 @@ object DagOperations {
 
   /**
     * Returns `true` when there is a (possibly empty) path through the
-    * main tree from `largerRank` to `smallerRank`.
+    * main tree from `start` to `target`.
     */
   def isMainAncestor[F[_]: Monad](
       target: Message,
