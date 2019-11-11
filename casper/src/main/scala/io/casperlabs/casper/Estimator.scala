@@ -96,11 +96,11 @@ object Estimator {
       .map(_.collect { case (v, Some(m)) => v -> m })
 
   /**
-    * Finds the main child of `b` that `v` votes for, if any.
+    * Finds the main child of `b` that the validator with latest message
+    * `latestMessage` votes for, if any.
     */
-  private def voteForChild[F[_]: MonadThrowable](
+  private def childVotedFor[F[_]: MonadThrowable](
       b: BlockHash,
-      v: Validator,
       latestMessage: Message,
       dag: DagRepresentation[F]
   ): F[Option[Message]] = dag.lookup(b) flatMap {
@@ -108,9 +108,12 @@ object Estimator {
 
     case Some(message) =>
       DagOperations
-        .swimlaneV[F](v, latestMessage, dag)
+        .swimlaneV[F](latestMessage.validatorId, latestMessage, dag)
         .takeWhile(_.rank > message.rank)
+        // for each message, `lm`, from this validator,
+        // (lazily) find the child of `message` it votes for, if any
         .flatMap(lm => StreamT.lift(DagOperations.findMainAncestor[F](message, lm, dag)))
+        // find the most recent vote
         .find(_.nonEmpty)
         .map(_.flatten)
   }
@@ -161,7 +164,7 @@ object Estimator {
         .traverse {
           case (v, lm) =>
             for {
-              maybeChild <- voteForChild[F](block, v, lm, dag)
+              maybeChild <- childVotedFor[F](block, lm, dag)
               weight     <- weightFromValidatorByDag[F](dag, block, v)
             } yield (weight, maybeChild)
         }
