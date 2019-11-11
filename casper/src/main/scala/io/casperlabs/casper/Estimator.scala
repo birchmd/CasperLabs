@@ -43,7 +43,7 @@ object Estimator {
                                  latestMessageHashes,
                                  equivocators
                                )
-            result <- forkChoiceLoop(List(lca), honestValidators, view, dag).timer("forkChoiceLoop")
+            result <- forkChoiceLoop(List(lca), honestValidators, view).timer("forkChoiceLoop")
             secondaryParents <- filterSecondaryParents[F](
                                  result.head,
                                  result.tail,
@@ -121,18 +121,17 @@ object Estimator {
   private def forkChoiceLoop[F[_]: MonadThrowable](
       orderedCandidates: List[BlockHash],
       honestLatestMessages: List[(Validator, Message)],
-      view: DagView[F],
-      dag: DagRepresentation[F]
+      view: DagView[F]
   ): F[List[BlockHash]] =
     orderedCandidates
       .traverse { block =>
-        orderChildren[F](block, honestLatestMessages, view, dag)
+        orderChildren[F](block, honestLatestMessages, view)
       }
       .flatMap { orderedChildren =>
         val newCandidates = orderedChildren.flatten
 
         if (orderedCandidates == newCandidates) orderedCandidates.pure[F]
-        else forkChoiceLoop(newCandidates, honestLatestMessages, view, dag)
+        else forkChoiceLoop(newCandidates, honestLatestMessages, view)
       }
 
   /**
@@ -154,8 +153,7 @@ object Estimator {
   private def orderChildren[F[_]: MonadThrowable](
       block: BlockHash,
       honestLatestMessages: List[(Validator, Message)],
-      view: DagView[F],
-      dag: DagRepresentation[F]
+      view: DagView[F]
   ): F[List[BlockHash]] = getMainChildrenInView[F](block, view) flatMap {
     case Nil => List(block).pure[F]
 
@@ -164,8 +162,8 @@ object Estimator {
         .traverse {
           case (v, lm) =>
             for {
-              maybeChild <- childVotedFor[F](block, lm, dag)
-              weight     <- weightFromValidatorByDag[F](dag, block, v)
+              maybeChild <- childVotedFor[F](block, lm, view.dag)
+              weight     <- weightFromValidatorByDag[F](view.dag, block, v)
             } yield (weight, maybeChild)
         }
         .map { votes =>
