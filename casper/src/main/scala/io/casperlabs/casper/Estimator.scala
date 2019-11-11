@@ -161,14 +161,17 @@ object Estimator {
       honestLatestMessages
         .traverse {
           case (v, lm) =>
-            for {
-              maybeChild <- childVotedFor[F](block, lm, view.dag)
-              weight     <- weightFromValidatorByDag[F](view.dag, block, v)
-            } yield (weight, maybeChild)
+            childVotedFor[F](block, lm, view.dag) flatMap {
+              case None => none[(BlockHash, BigInt)].pure[F]
+
+              case Some(child) =>
+                weightFromValidatorByDag[F](view.dag, block, v).map { weight =>
+                  (child.messageHash -> weight).some
+                }
+            }
         }
         .map { votes =>
-          val scores = votes
-            .collect { case (w, Some(child)) => child.messageHash -> w }
+          val scores = votes.flatten
             .groupBy(_._1)
             .mapValues(_.foldLeft(Zero) { case (acc, (_, weight)) => acc + weight })
 
