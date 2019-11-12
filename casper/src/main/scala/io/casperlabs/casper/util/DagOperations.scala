@@ -413,7 +413,7 @@ object DagOperations {
   def latestCommonAncestorsMainParent[F[_]: MonadThrowable](
       dag: DagRepresentation[F],
       starters: NonEmptyList[BlockHash]
-  ): F[BlockHash] = {
+  ): F[Message] = {
     implicit val blocksOrdering = DagOperations.blockTopoOrderingDesc
     import io.casperlabs.casper.util.implicits.eqMessageSummary
 
@@ -435,7 +435,6 @@ object DagOperations {
           block.parents.headOption.fold(block.pure[F])(lookup)
         }
       }
-      .map(_.messageHash)
   }
 
   /** Check if there's a (possibly empty) path leading from any of the starting points to any of the targets. */

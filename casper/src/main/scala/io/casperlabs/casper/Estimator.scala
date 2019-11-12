@@ -40,12 +40,14 @@ object Estimator {
             lca <- DagOperations
                     .latestCommonAncestorsMainParent(dag, latestMessages.map(_.messageHash))
                     .timer("calculateLCA")
+            _ <- Metrics[F]
+                  .record("lcaDistance", latestMessages.toList.maxBy(_.rank).rank - lca.rank)
             honestValidators <- latestHashesToLatestMessage[F](
                                  dag,
                                  latestMessageHashes,
                                  equivocators
                                )
-            init   = List(ForkChoiceLoopStatus.continue(lca))
+            init   = List(ForkChoiceLoopStatus.continue(lca.messageHash))
             result <- forkChoiceLoop(init, honestValidators, view).timer("forkChoiceLoop")
             secondaryParents <- filterSecondaryParents[F](
                                  result.head,
