@@ -1,7 +1,7 @@
 package io.casperlabs.casper.helper
 
 import cats.data.EitherT
-import cats.effect.{Concurrent, ContextShift, Timer}
+import cats.effect.{Concurrent, ContextShift, Sync, Timer}
 import cats.implicits._
 import cats.mtl.FunctorRaise
 import cats.{~>, Applicative, ApplicativeError, Defer, Id, Monad, Parallel}
@@ -316,7 +316,7 @@ object HashSetCasperTestNode {
     if (x.length < length) Array.fill(length - x.length)(0.toByte) ++ x
     else x
 
-  def makeValidation[F[_]: MonadThrowable: FunctorRaise[?[_], InvalidBlock]: Log: Time: Metrics]
+  def makeValidation[F[_]: Sync: FunctorRaise[?[_], InvalidBlock]: Log: Time: Metrics]
       : Validation[F] =
     new ValidationImpl[F] {
       // Tests are not signing the deploys.

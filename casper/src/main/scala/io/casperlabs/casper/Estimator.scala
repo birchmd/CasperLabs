@@ -2,6 +2,8 @@ package io.casperlabs.casper
 
 import cats.Monad
 import cats.data.NonEmptyList
+import cats.effect.Sync
+import cats.effect.concurrent.Ref
 import cats.implicits._
 import com.google.protobuf.ByteString
 import io.casperlabs.casper.util.DagOperations
@@ -23,7 +25,7 @@ object Estimator {
 
   implicit val metricsSource = CasperMetricsSource
 
-  def tips[F[_]: MonadThrowable: Metrics](
+  def tips[F[_]: Sync: Metrics](
       dag: DagRepresentation[F],
       genesis: BlockHash,
       latestMessageHashes: Map[Validator, Set[BlockHash]],
@@ -140,17 +142,6 @@ object Estimator {
       }
 
   /**
-    * Returns the children of `block` in the main tree which are visible from the
-    * given latest messages.
-    */
-  private def getMainChildrenInView[F[_]: MonadThrowable](
-      block: BlockHash,
-      view: DagView[F]
-  ): F[List[BlockHash]] = view.dag.getMainChildren(block) flatMap (
-    _.filterA(view.inView)
-  )
-
-  /**
     * Orders the children of `block` by how much weight votes for each of them
     * (using block hash has a tie breaker). If `block` has no children, then the
     * block itself is returned.
@@ -159,7 +150,7 @@ object Estimator {
       block: BlockHash,
       honestLatestMessages: List[(Validator, Message)],
       view: DagView[F]
-  ): F[List[ForkChoiceLoopStatus]] = getMainChildrenInView[F](block, view) flatMap {
+  ): F[List[ForkChoiceLoopStatus]] = view.getMainChildrenInView(block) flatMap {
     case Nil => List(ForkChoiceLoopStatus.terminated(block)).pure[F]
 
     case children =>
@@ -188,23 +179,55 @@ object Estimator {
         }
   }
 
-  private case class DagView[F[_]](dag: DagRepresentation[F], latestMessages: Set[Message]) {
+  private class DagView[F[_]](
+      val dag: DagRepresentation[F],
+      val latestMessages: Set[Message],
+      private val inViewSet: Ref[F, Set[BlockHash]]
+  ) {
     private val maxRank =
       if (latestMessages.isEmpty) 0L
       else latestMessages.map(_.rank).max
 
     def inView(blockHash: BlockHash)(implicit monad: Monad[F]): F[Boolean] =
-      dag.lookup(blockHash) flatMap {
-        case None => false.pure[F]
+      monad.ifM(inViewSet.get.map(_.contains(blockHash)))(
+        true.pure[F],
+        dag.lookup(blockHash) flatMap {
+          case None => false.pure[F]
 
-        case Some(message) =>
-          if (message.rank > maxRank) false.pure[F]
-          else DagOperations.anyJustificationPathExists[F](dag, latestMessages, Set(message))
-      }
+          case Some(message) =>
+            if (message.rank > maxRank) false.pure[F]
+            else {
+              // Doing it manually so that I can cache visited blocks in the j-past-cone.
+              DagOperations
+                .bfTraverseF[F, Message](latestMessages.toList)(
+                  _.justifications.toList
+                    .traverse(j => dag.lookup(j.latestBlockHash))
+                    .map(_.flatten)
+                )
+                .flatMap(m => StreamT.lift(inViewSet.update(_ + m.messageHash).as(m)))
+                .find(Set(message))
+                .map(_.nonEmpty)
+            }
+        }
+      )
+
+    /**
+      * Returns the children of `block` in the main tree which are visible from the
+      * given latest messages.
+      */
+    def getMainChildrenInView(block: BlockHash)(implicit monad: Monad[F]): F[List[BlockHash]] =
+      dag.getMainChildren(block) flatMap (
+        _.filterA(inView)
+      )
   }
 
   private object DagView {
-    def fromLatestMessageHashes[F[_]: cats.Applicative](
+    def apply[F[_]: Sync](dag: DagRepresentation[F], latestMessages: Set[Message]): F[DagView[F]] =
+      Ref
+        .of[F, Set[BlockHash]](latestMessages.map(_.messageHash))
+        .map(inViewSet => new DagView[F](dag, latestMessages, inViewSet))
+
+    def fromLatestMessageHashes[F[_]: Sync](
         latestMessageHashes: Map[Validator, Set[BlockHash]],
         dag: DagRepresentation[F]
     ): F[DagView[F]] =
@@ -214,7 +237,7 @@ object Estimator {
         }
         .toList
         .traverse(dag.lookup)
-        .map(lms => DagView[F](dag, lms.flatten.toSet))
+        .flatMap(lms => DagView[F](dag, lms.flatten.toSet))
   }
 
   /**

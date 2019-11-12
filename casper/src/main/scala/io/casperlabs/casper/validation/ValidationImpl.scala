@@ -1,5 +1,6 @@
 package io.casperlabs.casper.validation
 
+import cats.effect.Sync
 import cats.{Applicative, Monad}
 import cats.implicits._
 import cats.mtl.FunctorRaise
@@ -43,7 +44,7 @@ object ValidationImpl {
   def apply[F[_]](implicit ev: ValidationImpl[F]) = ev
 }
 
-class ValidationImpl[F[_]: MonadThrowable: FunctorRaise[?[_], InvalidBlock]: Log: Time: Metrics]
+class ValidationImpl[F[_]: Sync: FunctorRaise[?[_], InvalidBlock]: Log: Time: Metrics]
     extends Validation[F] {
   import ValidationImpl.DRIFT
   import ValidationImpl.MAX_TTL
