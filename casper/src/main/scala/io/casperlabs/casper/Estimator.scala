@@ -4,7 +4,6 @@ import cats.Monad
 import cats.data.NonEmptyList
 import cats.effect.Sync
 import cats.effect.concurrent.Ref
-import cats.implicits._
 import com.google.protobuf.ByteString
 import io.casperlabs.casper.util.DagOperations
 import io.casperlabs.casper.util.ProtoUtil.weightFromValidatorByDag
@@ -14,9 +13,12 @@ import io.casperlabs.metrics.implicits._
 import io.casperlabs.models.{Message, Weight}
 import io.casperlabs.shared.StreamT
 import io.casperlabs.storage.dag.DagRepresentation
+import cats.implicits._
+import com.github.ghik.silencer.silent
 
 import scala.collection.immutable.Map
 
+@silent("is never used")
 object Estimator {
   type BlockHash = ByteString
   type Validator = ByteString
@@ -125,7 +127,7 @@ object Estimator {
     }
   }
 
-  private def forkChoiceLoop[F[_]: MonadThrowable: Metrics](
+  private def forkChoiceLoop[F[_]: Sync: Metrics](
       orderedCandidates: List[ForkChoiceLoopStatus],
       honestLatestMessages: List[(Validator, Message)],
       view: DagView[F]
@@ -150,7 +152,7 @@ object Estimator {
     * (using block hash has a tie breaker). If `block` has no children, then the
     * block itself is returned.
     */
-  private def orderChildren[F[_]: MonadThrowable: Metrics](
+  private def orderChildren[F[_]: Sync: Metrics](
       block: BlockHash,
       honestLatestMessages: List[(Validator, Message)],
       view: DagView[F]
@@ -162,7 +164,7 @@ object Estimator {
         honestLatestMessages
           .traverse {
             case (v, lm) =>
-              childVotedFor[F](block, lm, view.dag) flatMap {
+              view.childVotedFor(block, lm) flatMap {
                 case None => none[(BlockHash, BigInt)].pure[F]
 
                 case Some(child) =>
@@ -188,7 +190,8 @@ object Estimator {
   private class DagView[F[_]](
       val dag: DagRepresentation[F],
       val latestMessages: Set[Message],
-      private val inViewSet: Ref[F, Set[BlockHash]]
+      private val inViewSet: Ref[F, Set[BlockHash]],
+      private val voteLookupTable: Ref[F, Map[Validator, Map[BlockHash, Message]]]
   ) {
     private val maxRank =
       if (latestMessages.isEmpty) 0L
@@ -217,6 +220,52 @@ object Estimator {
         }
       )
 
+    def childVotedFor(b: BlockHash, latestMessage: Message)(
+        implicit S: Sync[F],
+        M: Metrics[F]
+    ): F[Option[Message]] = M.timer("childVotedFor") {
+      voteLookupTable.get.flatMap { lookupTable =>
+        lookupTable.get(latestMessage.validatorId).flatMap(_.get(b)) match {
+          case Some(childVotedFor) =>
+            Option(childVotedFor).pure[F]
+          case None =>
+            dag.lookup(b).map(_.get).flatMap { message =>
+              DagOperations
+                .swimlaneV[F](latestMessage.validatorId, latestMessage, dag)
+                .takeWhile(_.rank > message.rank)
+                .flatMap(m => StreamT.lift(dag.lookup(m.parentBlock).map(_.get).tupleLeft(m))) // TODO: replace .get with lookupUnsafe
+                .flatMap {
+                  case (m, parent) =>
+                    // TODO: Possible optimization is to collect all the (message, main parent) pairs
+                    // while traversing and set the lookup table once, at the end.
+                    StreamT.lift(
+                      voteLookupTable
+                        .set(
+                          lookupTable.updated(
+                            latestMessage.validatorId,
+                            lookupTable
+                              .getOrElse(latestMessage.validatorId, Map.empty)
+                              .updated(parent.messageHash, m)
+                          )
+                        )
+                        .as(m)
+                    )
+                }
+                // TODO: We shouldn't need this. Just traverse the main tree once from latest messages to LCA
+                // and build up the lookup table.
+                // for each message, `lm`, from this validator,
+                // (lazily) find the child of `message` it votes for, if any
+                .flatMap(
+                  lm => StreamT.lift(DagOperations.findMainAncestor[F](message, lm, dag))
+                )
+                // find the most recent vote
+                .find(_.nonEmpty)
+                .map(_.flatten)
+            }
+        }
+      }
+    }
+
     /**
       * Returns the children of `block` in the main tree which are visible from the
       * given latest messages.
@@ -229,9 +278,11 @@ object Estimator {
 
   private object DagView {
     def apply[F[_]: Sync](dag: DagRepresentation[F], latestMessages: Set[Message]): F[DagView[F]] =
-      Ref
-        .of[F, Set[BlockHash]](latestMessages.map(_.messageHash))
-        .map(inViewSet => new DagView[F](dag, latestMessages, inViewSet))
+      for {
+        inViewSet <- Ref
+                      .of[F, Set[BlockHash]](latestMessages.map(_.messageHash))
+        votesLookupTable <- Ref.of[F, Map[Validator, Map[BlockHash, Message]]](Map.empty)
+      } yield new DagView[F](dag, latestMessages, inViewSet, votesLookupTable)
 
     def fromLatestMessageHashes[F[_]: Sync](
         latestMessageHashes: Map[Validator, Set[BlockHash]],
