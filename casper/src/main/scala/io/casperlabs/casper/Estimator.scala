@@ -104,26 +104,28 @@ object Estimator {
     * Finds the main child of `b` that the validator with latest message
     * `latestMessage` votes for, if any.
     */
-  private def childVotedFor[F[_]: MonadThrowable](
+  private def childVotedFor[F[_]: MonadThrowable: Metrics](
       b: BlockHash,
       latestMessage: Message,
       dag: DagRepresentation[F]
-  ): F[Option[Message]] = dag.lookup(b) flatMap {
-    case None => none[Message].pure[F]
+  ): F[Option[Message]] = Metrics[F].timer("childVotedFor") {
+    dag.lookup(b) flatMap {
+      case None => none[Message].pure[F]
 
-    case Some(message) =>
-      DagOperations
-        .swimlaneV[F](latestMessage.validatorId, latestMessage, dag)
-        .takeWhile(_.rank > message.rank)
-        // for each message, `lm`, from this validator,
-        // (lazily) find the child of `message` it votes for, if any
-        .flatMap(lm => StreamT.lift(DagOperations.findMainAncestor[F](message, lm, dag)))
-        // find the most recent vote
-        .find(_.nonEmpty)
-        .map(_.flatten)
+      case Some(message) =>
+        DagOperations
+          .swimlaneV[F](latestMessage.validatorId, latestMessage, dag)
+          .takeWhile(_.rank > message.rank)
+          // for each message, `lm`, from this validator,
+          // (lazily) find the child of `message` it votes for, if any
+          .flatMap(lm => StreamT.lift(DagOperations.findMainAncestor[F](message, lm, dag)))
+          // find the most recent vote
+          .find(_.nonEmpty)
+          .map(_.flatten)
+    }
   }
 
-  private def forkChoiceLoop[F[_]: MonadThrowable](
+  private def forkChoiceLoop[F[_]: MonadThrowable: Metrics](
       orderedCandidates: List[ForkChoiceLoopStatus],
       honestLatestMessages: List[(Validator, Message)],
       view: DagView[F]
@@ -148,37 +150,39 @@ object Estimator {
     * (using block hash has a tie breaker). If `block` has no children, then the
     * block itself is returned.
     */
-  private def orderChildren[F[_]: MonadThrowable](
+  private def orderChildren[F[_]: MonadThrowable: Metrics](
       block: BlockHash,
       honestLatestMessages: List[(Validator, Message)],
       view: DagView[F]
-  ): F[List[ForkChoiceLoopStatus]] = view.getMainChildrenInView(block) flatMap {
-    case Nil => List(ForkChoiceLoopStatus.terminated(block)).pure[F]
+  ): F[List[ForkChoiceLoopStatus]] = Metrics[F].timer("orderChildren") {
+    view.getMainChildrenInView(block) flatMap {
+      case Nil => List(ForkChoiceLoopStatus.terminated(block)).pure[F]
 
-    case children =>
-      honestLatestMessages
-        .traverse {
-          case (v, lm) =>
-            childVotedFor[F](block, lm, view.dag) flatMap {
-              case None => none[(BlockHash, BigInt)].pure[F]
+      case children =>
+        honestLatestMessages
+          .traverse {
+            case (v, lm) =>
+              childVotedFor[F](block, lm, view.dag) flatMap {
+                case None => none[(BlockHash, BigInt)].pure[F]
 
-              case Some(child) =>
-                weightFromValidatorByDag[F](view.dag, block, v).map { weight =>
-                  (child.messageHash -> weight).some
-                }
-            }
-        }
-        .map { votes =>
-          val scores = votes.flatten
-            .groupBy(_._1)
-            .mapValues(_.foldLeft(Zero) { case (acc, (_, weight)) => acc + weight })
+                case Some(child) =>
+                  weightFromValidatorByDag[F](view.dag, block, v).map { weight =>
+                    (child.messageHash -> weight).some
+                  }
+              }
+          }
+          .map { votes =>
+            val scores = votes.flatten
+              .groupBy(_._1)
+              .mapValues(_.foldLeft(Zero) { case (acc, (_, weight)) => acc + weight })
 
-          children
-            .sortBy(child => scores.getOrElse(child, Zero) -> child.toStringUtf8)(
-              Ordering[(BigInt, String)].reverse
-            )
-            .map(ForkChoiceLoopStatus.continue)
-        }
+            children
+              .sortBy(child => scores.getOrElse(child, Zero) -> child.toStringUtf8)(
+                Ordering[(BigInt, String)].reverse
+              )
+              .map(ForkChoiceLoopStatus.continue)
+          }
+    }
   }
 
   private class DagView[F[_]](
