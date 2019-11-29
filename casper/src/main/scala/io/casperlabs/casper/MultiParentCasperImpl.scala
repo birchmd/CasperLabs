@@ -584,6 +584,10 @@ object MultiParentCasperImpl {
                                                                   faultToleranceThreshold
                                                                 )
       _ <- LastFinalizedBlockHashContainer[F].set(lca)
+      _ <- Log[F].info(
+            s"${lmh.values.flatten.toList.map(PrettyPrinter.buildString).mkString(",") -> "LATEST_MESSAGES"}"
+          )
+      _ <- Log[F].info(s"${PrettyPrinter.buildString(lca) -> "INIT_LFB"}")
     } yield new MultiParentCasperImpl[F](
       semaphoreMap,
       statelessExecutor,
