@@ -76,6 +76,7 @@ object Estimator {
         _ <- Log[F].info(
               s"Latest messages: $msg"
             )
+        _ <- Log[F].info(s"${lfb -> "LFB"}")
         scoresWithCreator <- scores.toList.traverse {
                               case (blockHash, score) =>
                                 dag
