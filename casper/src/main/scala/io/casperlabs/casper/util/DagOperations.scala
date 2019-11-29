@@ -345,7 +345,7 @@ object DagOperations {
       a.pure[F]
     } else {
       Ordering[A].compare(a, b) match {
-        case -1 =>
+        case x if x < 0 =>
           // Block `b` is "higher" in the chain
           next(b).flatMap(latestCommonAncestorF(a, _)(next))
         case 0 =>
@@ -355,7 +355,7 @@ object DagOperations {
             bb  <- next(b)
             lca <- latestCommonAncestorF(aa, bb)(next)
           } yield lca
-        case 1 =>
+        case x if x > 0 =>
           next(a).flatMap(latestCommonAncestorF(b, _)(next))
       }
     }
